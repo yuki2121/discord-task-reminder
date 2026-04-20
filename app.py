@@ -5,9 +5,41 @@ from nacl.signing import VerifyKey
 from nacl.exceptions import BadSignatureError
 from google import genai
 from google.genai import types
+import threading
 
 app = Flask(__name__)
 
+DISCORD_API = "https://discord.com/api/v10"
+
+
+def update_discord_original_response(application_id: str, interaction_token: str, content: str):
+    url = f"{DISCORD_API}/webhooks/{application_id}/{interaction_token}/messages/@original"
+    requests.patch(
+        url,
+        json={
+            "content": content[:1800],
+            "allowed_mentions": {"parse": []}
+        },
+        timeout=30,
+    )
+
+
+def handle_ask_command_async(application_id: str, interaction_token: str, question: str):
+    try:
+        if not question.strip():
+            reply = "Please provide a question."
+        else:
+            reply = ask_agent(question).strip()
+
+        if not reply:
+            reply = "I couldn't generate a reply."
+    except Exception as e:
+        reply = f"Error: {str(e)}"
+
+    try:
+        update_discord_original_response(application_id, interaction_token, reply)
+    except Exception as e:
+        print(f"Failed to update Discord response: {e}")
 
 def get_todo_text() -> str:
     return os.getenv(
@@ -139,18 +171,21 @@ def discord_interactions():
                     question = opt.get("value", "")
                     break
 
-            if not question.strip():
-                reply = "Please provide a question."
-            else:
-                reply = ask_agent(question).strip()
+            application_id = payload["application_id"]
+            interaction_token = payload["token"]
 
-            # flags: 64 = ephemeral/private reply
+            threading.Thread(
+                target=handle_ask_command_async,
+                args=(application_id, interaction_token, question),
+                daemon=True,
+            ).start()
+
+            # type 5 = deferred response
+            # flags 64 = ephemeral/private
             return jsonify({
-                "type": 4,
+                "type": 5,
                 "data": {
-                    "content": reply[:1800],
-                    "flags": 64,
-                    "allowed_mentions": {"parse": []}
+                    "flags": 64
                 }
             })
 
