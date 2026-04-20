@@ -3,6 +3,7 @@ import requests
 from flask import Flask, jsonify, request
 from google import genai
 from google.genai.types import HttpOptions
+from google.genai import types
 
 app = Flask(__name__)
 
@@ -15,26 +16,33 @@ def get_todo_text() -> str:
     )
 
 def build_message_with_vertex(todo_text: str) -> str:
-    client = genai.Client(http_options=HttpOptions(api_version="v1"))
+    client = genai.Client(
+        vertexai=True,
+        project=os.environ["GOOGLE_CLOUD_PROJECT"],
+        location=os.getenv("GOOGLE_CLOUD_LOCATION", "global"),
+        http_options=types.HttpOptions(api_version="v1"),
+    )
 
     prompt = f"""
-You are a reminder assistant.
-Review the todo list below and write one short Discord reminder message.
+    You are a reminder assistant.
+    Review the todo list below and write one short Discord reminder message.
 
-Rules:
-- Focus on unfinished or urgent-looking items
-- Keep it short
-- Use simple plain English
-- If nothing seems urgent, say: No urgent unfinished tasks right now.
+    Rules:
+    - Focus on unfinished or urgent-looking items
+    - Keep it short
+    - Use simple plain English
+    - If nothing seems urgent, say: No urgent unfinished tasks right now.
 
-Todo list:
-{todo_text}
-""".strip()
+    Todo list:
+    {todo_text}
+    """.strip()
 
     response = client.models.generate_content(
         model=os.getenv("MODEL_NAME", "gemini-2.5-pro"),
         contents=prompt,
     )
+
+    client.close()
     return (response.text or "").strip()
 
 @app.get("/")
