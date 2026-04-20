@@ -216,80 +216,80 @@ def discord_interactions():
         command_name = payload["data"]["name"]
         user_id = get_user_id_from_payload(payload)
 
-    if command_name == "ask":
-        options = payload["data"].get("options", [])
-        question = ""
-        for opt in options:
-            if opt.get("name") == "question":
-                question = opt.get("value", "")
-                break
+        if command_name == "ask":
+            options = payload["data"].get("options", [])
+            question = ""
+            for opt in options:
+                if opt.get("name") == "question":
+                    question = opt.get("value", "")
+                    break
 
-        application_id = payload["application_id"]
-        interaction_token = payload["token"]
+            application_id = payload["application_id"]
+            interaction_token = payload["token"]
 
-        threading.Thread(
-            target=handle_ask_command_async,
-            args=(application_id, interaction_token, question, user_id),
-            daemon=True,
-        ).start()
+            threading.Thread(
+                target=handle_ask_command_async,
+                args=(application_id, interaction_token, question, user_id),
+                daemon=True,
+            ).start()
 
-        return jsonify({
-            "type": 5,
-            "data": {
-                "flags": 64
-            }
-        })
-
-    if command_name == "remember":
-        options = payload["data"].get("options", [])
-        note = ""
-        for opt in options:
-            if opt.get("name") == "note":
-                note = opt.get("value", "")
-                break
-
-        if not note.strip():
             return jsonify({
-                "type": 4,
+                "type": 5,
                 "data": {
-                    "content": "Please provide a note to remember.",
                     "flags": 64
                 }
             })
 
-        add_memory(user_id, note.strip())
-        return jsonify({
-            "type": 4,
-            "data": {
-                "content": f"Saved: {note[:150]}",
-                "flags": 64
-            }
-        })
+        if command_name == "remember":
+            options = payload["data"].get("options", [])
+            note = ""
+            for opt in options:
+                if opt.get("name") == "note":
+                    note = opt.get("value", "")
+                    break
 
-    if command_name == "memories":
-        memories = get_memories(user_id)
-        if not memories:
-            content = "No saved memories yet."
-        else:
-            content = "\n".join(f"{i+1}. {m}" for i, m in enumerate(memories[:20]))
+            if not note.strip():
+                return jsonify({
+                    "type": 4,
+                    "data": {
+                        "content": "Please provide a note to remember.",
+                        "flags": 64
+                    }
+                })
 
-        return jsonify({
-            "type": 4,
-            "data": {
-                "content": content[:1800],
-                "flags": 64
-            }
-        })
+            add_memory(user_id, note.strip())
+            return jsonify({
+                "type": 4,
+                "data": {
+                    "content": f"Saved: {note[:150]}",
+                    "flags": 64
+                }
+            })
 
-    if command_name == "clear_memories":
-        clear_memories(user_id)
-        return jsonify({
-            "type": 4,
-            "data": {
-                "content": "Cleared all saved memories.",
-                "flags": 64
-            }
-        })
+        if command_name == "memories":
+            memories = get_memories(user_id)
+            if not memories:
+                content = "No saved memories yet."
+            else:
+                content = "\n".join(f"{i+1}. {m}" for i, m in enumerate(memories[:20]))
+
+            return jsonify({
+                "type": 4,
+                "data": {
+                    "content": content[:1800],
+                    "flags": 64
+                }
+            })
+
+        if command_name == "clear_memories":
+            clear_memories(user_id)
+            return jsonify({
+                "type": 4,
+                "data": {
+                    "content": "Cleared all saved memories.",
+                    "flags": 64
+                }
+            })
 
     return jsonify({
         "type": 4,
