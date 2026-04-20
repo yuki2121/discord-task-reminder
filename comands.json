@@ -1,0 +1,48 @@
+[
+  {
+    "name": "ask",
+    "description": "Ask my agent a question",
+    "type": 1,
+    "options": [
+      {
+        "name": "question",
+        "description": "What do you want to ask?",
+        "type": 3,
+        "required": true
+      }
+    ]
+  },
+  {
+    "name": "todo_add",
+    "description": "Add a todo item",
+    "type": 1,
+    "options": [
+      {
+        "name": "item",
+        "description": "Todo item text",
+        "type": 3,
+        "required": true
+      }
+    ]
+  },
+  {
+    "name": "todo_list",
+    "description": "Show saved todos",
+    "type": 1
+  },
+  {
+    "name": "todo_clear",
+    "description": "Clear all todos",
+    "type": 1
+  },
+  {
+    "name": "memories",
+    "description": "Show saved memories",
+    "type": 1
+  },
+  {
+    "name": "clear_memories",
+    "description": "Clear saved memories",
+    "type": 1
+  }
+]
