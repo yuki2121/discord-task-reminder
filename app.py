@@ -23,38 +23,86 @@ def get_user_id_from_payload(payload: dict) -> str:
         return payload["user"]["id"]
     return "unknown"
 
+def user_state_doc(user_id: str):
+    return db.collection("discord_state").document(user_id)
 
-def memory_doc(user_id: str):
-    return db.collection("discord_memory").document(user_id)
+
+def get_user_state(user_id: str) -> dict:
+    snap = user_state_doc(user_id).get()
+    if not snap.exists:
+        return {"todos": [], "memories": [], "pending_answer": None}
+    data = snap.to_dict() or {}
+    data.setdefault("todos", [])
+    data.setdefault("memories", [])
+    data.setdefault("pending_answer", None)
+    return data
+
+
+def save_user_state(user_id: str, state: dict):
+    user_state_doc(user_id).set(state, merge=True)
 
 
 def add_memory(user_id: str, note: str):
-    doc = memory_doc(user_id)
-    snap = doc.get()
-
-    items = []
-    if snap.exists:
-        items = snap.to_dict().get("items", [])
-
-    items.append({
+    state = get_user_state(user_id)
+    state["memories"].append({
         "text": note,
         "created_at": datetime.now(timezone.utc).isoformat()
     })
-
-    doc.set({"items": items}, merge=True)
+    save_user_state(user_id, state)
 
 
 def get_memories(user_id: str) -> list[str]:
-    snap = memory_doc(user_id).get()
-    if not snap.exists:
-        return []
-
-    items = snap.to_dict().get("items", [])
-    return [item.get("text", "") for item in items if item.get("text")]
+    state = get_user_state(user_id)
+    return [item.get("text", "") for item in state["memories"] if item.get("text")]
 
 
 def clear_memories(user_id: str):
-    memory_doc(user_id).set({"items": []}, merge=True)
+    state = get_user_state(user_id)
+    state["memories"] = []
+    save_user_state(user_id, state)
+
+
+def add_todo(user_id: str, item: str):
+    state = get_user_state(user_id)
+    state["todos"].append({
+        "text": item,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    })
+    save_user_state(user_id, state)
+
+
+def get_todos(user_id: str) -> list[str]:
+    state = get_user_state(user_id)
+    return [item.get("text", "") for item in state["todos"] if item.get("text")]
+
+
+def clear_todos(user_id: str):
+    state = get_user_state(user_id)
+    state["todos"] = []
+    save_user_state(user_id, state)
+
+
+def set_pending_answer(user_id: str, answer: str):
+    state = get_user_state(user_id)
+    state["pending_answer"] = {
+        "text": answer,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    save_user_state(user_id, state)
+
+
+def get_pending_answer(user_id: str) -> str | None:
+    state = get_user_state(user_id)
+    pending = state.get("pending_answer")
+    if not pending:
+        return None
+    return pending.get("text")
+
+
+def clear_pending_answer(user_id: str):
+    state = get_user_state(user_id)
+    state["pending_answer"] = None
+    save_user_state(user_id, state)
 
 def update_discord_original_response(application_id: str, interaction_token: str, content: str):
     url = f"{DISCORD_API}/webhooks/{application_id}/{interaction_token}/messages/@original"
@@ -67,7 +115,6 @@ def update_discord_original_response(application_id: str, interaction_token: str
         timeout=30,
     )
 
-
 def handle_ask_command_async(application_id: str, interaction_token: str, question: str, user_id: str):
     try:
         if not question.strip():
@@ -77,19 +124,48 @@ def handle_ask_command_async(application_id: str, interaction_token: str, questi
 
         if not reply:
             reply = "I couldn't generate a reply."
-    except Exception as e:
-        reply = f"Error: {str(e)}"
 
-    try:
-        update_discord_original_response(application_id, interaction_token, reply)
-    except Exception as e:
-        print(f"Failed to update Discord response: {e}")
+        set_pending_answer(user_id, reply)
 
-def get_todo_text() -> str:
-    return os.getenv(
-        "TODO_TEXT",
-        "1. Finish report\n2. Follow up email\n3. Check incomplete tasks"
-    )
+        url = f"{DISCORD_API}/webhooks/{application_id}/{interaction_token}/messages/@original"
+        requests.patch(
+            url,
+            json={
+                "content": reply[:1800],
+                "components": [
+                    {
+                        "type": 1,
+                        "components": [
+                            {
+                                "type": 2,
+                                "style": 3,
+                                "label": "Remember this answer",
+                                "custom_id": "remember_last_answer"
+                            },
+                            {
+                                "type": 2,
+                                "style": 2,
+                                "label": "Discard",
+                                "custom_id": "discard_last_answer"
+                            }
+                        ]
+                    }
+                ],
+                "allowed_mentions": {"parse": []}
+            },
+            timeout=30,
+        )
+    except Exception as e:
+        try:
+            update_discord_original_response(application_id, interaction_token, f"Error: {str(e)}")
+        except Exception as inner_e:
+            print(f"Failed to update Discord response: {inner_e}")
+            
+            
+
+def get_todo_text(user_id: str) -> str:
+    todos = get_todos(user_id)
+    return "\n".join(f"- {t}" for t in todos) if todos else "None"
 
 
 def get_vertex_client():
@@ -131,8 +207,11 @@ Todo list:
     return generate_text(prompt)
 
 
+
 def ask_agent(question: str, user_id: str) -> str:
-    todo_text = get_todo_text()
+    todos = get_todos(user_id)
+    todo_block = "\n".join(f"- {t}" for t in todos) if todos else "None"
+
     memories = get_memories(user_id)
     memory_block = "\n".join(f"- {m}" for m in memories) if memories else "None"
 
@@ -140,7 +219,7 @@ def ask_agent(question: str, user_id: str) -> str:
 You are my Discord task assistant.
 
 Current todo list:
-{todo_text}
+{todo_block}
 
 Saved memory for this user:
 {memory_block}
@@ -182,10 +261,16 @@ def health():
 
 
 # Daily scheduler endpoint
+def get_owner_user_id() -> str:
+    return os.environ["OWNER_USER_ID"]
+
+
 @app.post("/run")
 def run_job():
     webhook_url = os.environ["DISCORD_WEBHOOK_URL"]
-    todo_text = get_todo_text()
+    owner_user_id = get_owner_user_id()
+    todos = get_todos(owner_user_id)
+    todo_text = "\n".join(f"- {t}" for t in todos) if todos else "No todos saved."
     message = build_daily_reminder(todo_text)
 
     discord_resp = requests.post(
@@ -290,7 +375,91 @@ def discord_interactions():
                     "flags": 64
                 }
             })
+        if command_name == "todo_add":
+            options = payload["data"].get("options", [])
+            item = ""
+            for opt in options:
+                if opt.get("name") == "item":
+                    item = opt.get("value", "")
+                    break
 
+            if not item.strip():
+                return jsonify({
+                    "type": 4,
+                    "data": {
+                        "content": "Please provide a todo item.",
+                        "flags": 64
+                    }
+                })
+
+            add_todo(user_id, item.strip())
+            return jsonify({
+                "type": 4,
+                "data": {
+                    "content": f"Added todo: {item[:150]}",
+                    "flags": 64
+                }
+            })
+
+        if command_name == "todo_list":
+            todos = get_todos(user_id)
+            if not todos:
+                content = "No todos saved."
+            else:
+                content = "\n".join(f"{i+1}. {t}" for i, t in enumerate(todos[:20]))
+
+            return jsonify({
+                "type": 4,
+                "data": {
+                    "content": content[:1800],
+                    "flags": 64
+                }
+            })
+
+        if command_name == "todo_clear":
+            clear_todos(user_id)
+            return jsonify({
+                "type": 4,
+                "data": {
+                    "content": "Cleared all todos.",
+                    "flags": 64
+                }
+            })
+            
+            
+    # Button / component interaction
+    if payload.get("type") == 3:
+        user_id = get_user_id_from_payload(payload)
+        custom_id = payload["data"]["custom_id"]
+
+        if custom_id == "remember_last_answer":
+            pending = get_pending_answer(user_id)
+            if not pending:
+                content = "There is no pending answer to remember."
+            else:
+                add_memory(user_id, pending)
+                clear_pending_answer(user_id)
+                content = "Saved that answer to memory."
+
+            return jsonify({
+                "type": 7,
+                "data": {
+                    "content": content,
+                    "components": []
+                }
+            })
+
+        if custom_id == "discard_last_answer":
+            clear_pending_answer(user_id)
+            return jsonify({
+                "type": 7,
+                "data": {
+                    "content": "Okay, I did not save that answer.",
+                    "components": []
+                }
+            })
+            
+            
     return jsonify({
         "type": 4,
         "data": {
