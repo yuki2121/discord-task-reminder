@@ -8,6 +8,7 @@ from google.genai import types
 import threading
 from google.cloud import firestore
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 app = Flask(__name__)
 
@@ -190,20 +191,40 @@ def generate_text(prompt: str) -> str:
         client.close()
 
 
-def build_daily_reminder(todo_text: str) -> str:
+def build_daily_reminder(user_id: str) -> str:
+    tz_name = os.getenv("OWNER_TIMEZONE", "Asia/Hong_Kong")
+    now_local = datetime.now(ZoneInfo(tz_name))
+
+    todos = get_todos(user_id)
+    memories = get_memories(user_id)
+
+    todo_block = "\n".join(f"- {t}" for t in todos) if todos else "None"
+    memory_block = "\n".join(f"- {m}" for m in memories) if memories else "None"
+
     prompt = f"""
-You are a reminder assistant.
-Review the todo list below and write one short Discord reminder message.
+You are my daily task reminder assistant.
 
-Rules:
-- Focus on unfinished or urgent-looking items
-- Keep it short
-- Use simple plain English
-- If nothing seems urgent, say: No urgent unfinished tasks right now.
+Today local date/time:
+{now_local.strftime("%Y-%m-%d %H:%M:%S %Z")}
 
-Todo list:
-{todo_text}
+Saved todo list:
+{todo_block}
+
+Saved memory:
+{memory_block}
+
+Your job:
+- Think like my manual assistant
+- Infer what are the most relevant tasks for today from both the todo list and memory
+- Prefer clearly actionable items
+- Ignore memories that are not useful for today's action
+- If memory suggests a task that is not already in the todo list, you may still include it
+- Keep the reminder short and practical
+- Use bullet points
+- End with one short priority suggestion
+- If nothing seems actionable today, say: No urgent unfinished tasks right now.
 """.strip()
+
     return generate_text(prompt)
 
 
@@ -269,9 +290,7 @@ def get_owner_user_id() -> str:
 def run_job():
     webhook_url = os.environ["DISCORD_WEBHOOK_URL"]
     owner_user_id = get_owner_user_id()
-    todos = get_todos(owner_user_id)
-    todo_text = "\n".join(f"- {t}" for t in todos) if todos else "No todos saved."
-    message = build_daily_reminder(todo_text)
+    message = build_daily_reminder(owner_user_id)
 
     discord_resp = requests.post(
         webhook_url,
