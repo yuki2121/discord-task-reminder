@@ -222,7 +222,7 @@ Your job:
 - Keep the reminder short and practical
 - Use bullet points
 - End with one short priority suggestion
-- If nothing seems actionable today, say: No urgent unfinished tasks right now.
+- If nothing seems actionable today, say: No urgent unfinished tasks right now: {now_local.strftime("%Y-%m-%d %H:%M:%S %Z")}.
 """.strip()
 
     return generate_text(prompt)
